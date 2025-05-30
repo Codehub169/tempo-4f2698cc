@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Gemini HTML Builder</title>
+  <style>
+    body { font-family: sans-serif; padding: 1rem; margin: 0; }
+    #preview {
+      border: 1px solid #ccc;
+      margin-top: 1rem;
+      width: 100%;
+      height: 90vh;
+      resize: vertical;
+    }
+    #controls {
+      display: flex;
+      gap: 1rem;
+      align-items: center;
+    }
+    input[type="text"] {
+      flex: 1;
+      padding: 0.5rem;
+      font-size: 1rem;
+    }
+    button {
+      padding: 0.5rem 1rem;
+      font-size: 1rem;
+    }
+  </style>
+</head>
+<body>
+  <h1>Generate HTML in Real-Time ✨</h1>
+  <div id="controls">
+    <input id="prompt" type="text" placeholder="Describe your UI..." />
+    <button onclick="startStream()">Generate</button>
+  </div>
+  <iframe id="preview" sandbox="allow-scripts allow-same-origin"></iframe>
+
+  <script>
+    function startStream() {
+      const prompt = document.getElementById("prompt").value;
+      const preview = document.getElementById("preview");
+      preview.srcdoc = ""; // clear previous
+      let fullHTML = "";
+
+      const eventSource = new EventSource(`/generate?prompt=${encodeURIComponent(prompt)}`);
+
+      eventSource.onmessage = (event) => {
+        if (event.data === "[DONE]") {
+          eventSource.close();
+        } else if (event.data.startsWith("Error:")) {
+          console.error(event.data);
+          eventSource.close();
+        } else {
+          const text = event.data.replace(/\\n/g, "\n").replace(/\\r/g, "\r");
+          fullHTML += text;
+          preview.srcdoc = fullHTML;
+
+          // Auto-scroll the iframe
+          setTimeout(() => {
+            preview.contentWindow?.scrollTo(0, preview.contentDocument?.body?.scrollHeight || 0);
+          }, 50);
+        }
+      };
+
+      eventSource.onerror = (err) => {
+        console.error("EventSource failed:", err);
+        eventSource.close();
+      };
+    }
+  </script>
+</body>
+</html>
