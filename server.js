@@ -61,7 +61,7 @@ app.get("/generate", async (req, res) => {
          The main file should be named index.html. Include all necessary files this way so the frontend can preview index.html and allow ZIP download of all files.
 
          You are not allowed to talk or introduce the output — just stream the raw code.
-            `
+            `, maxOutputTokens: 64000
          },
       });
 
