@@ -1,73 +1,298 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8" />
-  <title>Gemini HTML Builder</title>
+  <title>Gemini HTML Builder with Tabs</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
   <style>
-    body { font-family: sans-serif; padding: 1rem; margin: 0; }
-    #preview {
-      border: 1px solid #ccc;
-      margin-top: 1rem;
-      width: 100%;
-      height: 90vh;
-      resize: vertical;
+    body {
+      font-family: sans-serif;
+      padding: 1rem;
+      margin: 0;
+      background: #f5f5f5;
     }
+
     #controls {
       display: flex;
-      gap: 1rem;
-      align-items: center;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-bottom: 1rem;
     }
+
     input[type="text"] {
       flex: 1;
       padding: 0.5rem;
       font-size: 1rem;
+      border: 1px solid #ccc;
+      border-radius: 6px;
     }
+
     button {
       padding: 0.5rem 1rem;
       font-size: 1rem;
+      background: #0057e7;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #003fbe;
+    }
+
+    #status {
+      font-style: italic;
+      margin-bottom: 0.5rem;
+      color: #555;
+    }
+
+    #tabs {
+      display: flex;
+      border-bottom: 1px solid #ccc;
+      margin-bottom: 0.5rem;
+      overflow-x: auto;
+    }
+
+    .tab {
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border: 1px solid #ccc;
+      border-bottom: none;
+      background: #eee;
+      margin-right: 4px;
+      border-top-left-radius: 6px;
+      border-top-right-radius: 6px;
+      white-space: nowrap;
+      user-select: none;
+      font-weight: 500;
+    }
+
+    .tab.active {
+      background: white;
+      border-color: #ccc #ccc white;
+      font-weight: 700;
+      color: #0057e7;
+    }
+
+    #preview-container {
+      position: relative;
+    }
+
+    #preview {
+      border: 1px solid #ccc;
+      background: white;
+      width: 100%;
+      height: 85vh;
+      overflow: auto;
+      padding: 1rem;
+      white-space: pre-wrap;
+    }
+
+    #renderMode {
+      margin-bottom: 0.5rem;
     }
   </style>
 </head>
+
 <body>
   <h1>Generate HTML in Real-Time ✨</h1>
+
   <div id="controls">
-    <input id="prompt" type="text" placeholder="Describe your UI..." />
+    <input id="prompt" type="text"
+      placeholder="Describe your UI (e.g. modern portfolio with about and contact pages)" />
     <button onclick="startStream()">Generate</button>
+    <button onclick="downloadZip()">Download ZIP</button>
+    <select id="renderMode" onchange="updatePreview()">
+      <option value="html">Render HTML</option>
+      <option value="code">Show as Code</option>
+      <option value="text">Plain Text</option>
+    </select>
+    <select id="modelSelect">
+      <option value="gemini-2.5-pro-preview-05-06">Gemini Pro</option>
+      <option value="gemini-2.5-flash-preview-05-20">Gemini Flash</option>
+    </select>
   </div>
-  <iframe id="preview" sandbox="allow-scripts allow-same-origin"></iframe>
+
+  <div id="status"></div>
+
+  <div id="tabs"></div>
+
+  <div id="preview-container">
+    <div id="preview"></div>
+  </div>
 
   <script>
-    function startStream() {
-      const prompt = document.getElementById("prompt").value;
-      const preview = document.getElementById("preview");
-      preview.srcdoc = ""; // clear previous
-      let fullHTML = "";
+    let pages = {};
+    let currentFile = "index.html";
+    let seenFirstFileTag = false;
+    let insideCodeBlock = false;
 
-      const eventSource = new EventSource(`/generate?prompt=${encodeURIComponent(prompt)}`);
+    function createTab(filename) {
+      if (document.querySelector(`.tab[data-file="${filename}"]`)) return;
+
+      const tab = document.createElement("button");
+      tab.classList.add("tab");
+      tab.dataset.file = filename;
+      tab.textContent = filename;
+      tab.onclick = () => setActiveTab(filename);
+      document.getElementById("tabs").appendChild(tab);
+    }
+
+    function setActiveTab(filename) {
+      currentFile = filename;
+      document.querySelectorAll('.tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.file === filename);
+      });
+      updatePreview();
+    }
+
+    let iframe = null; // globally scoped outside updatePreview()
+
+    function updatePreview() {
+      const mode = document.getElementById("renderMode").value;
+      const preview = document.getElementById("preview");
+      const content = pages[currentFile] || "";
+
+      if (mode === "html") {
+        // Create iframe only once
+        if (!iframe) {
+          iframe = document.createElement("iframe");
+          iframe.style.width = "100%";
+          iframe.style.height = "100%";
+          iframe.style.border = "none";
+          preview.innerHTML = ""; // only once
+          preview.appendChild(iframe);
+        }
+
+        const doc = iframe.contentDocument || iframe.contentWindow.document;
+        doc.open();
+        doc.write(content);
+        doc.close();
+      } else {
+        // Remove iframe if present
+        if (iframe) {
+          iframe.remove();
+          iframe = null;
+        }
+
+        if (mode === "code") {
+          preview.innerHTML = `<pre><code>${escapeHTML(content)}</code></pre>`;
+        } else {
+          preview.textContent = content;
+        }
+      }
+    }
+
+    function escapeHTML(str) {
+      return str.replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    function startStream() {
+      const prompt = document.getElementById("prompt").value.trim();
+      const status = document.getElementById("status");
+
+      if (!prompt) {
+        alert("Please enter a prompt.");
+        return;
+      }
+
+      // Reset state
+      pages = {};
+      currentFile = "index.html";
+      seenFirstFileTag = false;
+      insideCodeBlock = false;
+      document.getElementById("preview").innerHTML = "";
+      document.getElementById("tabs").innerHTML = "";
+      status.textContent = "Generating...";
+
+      pages[currentFile] = "";
+      createTab(currentFile);
+      setActiveTab(currentFile);
+
+      const model = document.getElementById("modelSelect").value;
+      document.getElementById("modelSelect").disabled = true;
+      const eventSource = new EventSource(`/generate?prompt=${encodeURIComponent(prompt)}&model=${encodeURIComponent(model)}`);
 
       eventSource.onmessage = (event) => {
-        if (event.data === "[DONE]") {
-          eventSource.close();
-        } else if (event.data.startsWith("Error:")) {
-          console.error(event.data);
-          eventSource.close();
-        } else {
-          const text = event.data.replace(/\\n/g, "\n").replace(/\\r/g, "\r");
-          fullHTML += text;
-          preview.srcdoc = fullHTML;
+        const raw = event.data;
 
-          // Auto-scroll the iframe
-          setTimeout(() => {
-            preview.contentWindow?.scrollTo(0, preview.contentDocument?.body?.scrollHeight || 0);
-          }, 50);
+        if (raw.trim() === "[DONE]") {
+          eventSource.close();
+          status.textContent = "Done.";
+          return;
         }
+
+        if (raw.startsWith("Error:")) {
+          eventSource.close();
+          status.textContent = "Error occurred.";
+          return;
+        }
+
+        // Detect [FILE: filename] anywhere in the stream
+        const trimmed = raw.trim();
+        const fileMatch = trimmed.match(/\[FILE:\s*([^\]]+?)\s*\]/);
+        if (fileMatch) {
+          const newFile = fileMatch[1].trim();
+          currentFile = newFile;
+          console.log(currentFile);
+          seenFirstFileTag = true;
+          if (!(currentFile in pages)) pages[currentFile] = "";
+          createTab(currentFile);
+          setActiveTab(currentFile);
+          return; // Skip appending this line as content
+        }
+
+        // If no current file yet, start with index.html
+        if (!currentFile) {
+          currentFile = "index.html";
+          pages[currentFile] = "";
+          createTab(currentFile);
+          setActiveTab(currentFile);
+        }
+
+        // Append raw data, replacing literal \n with real newlines
+        pages[currentFile] += raw.replace(/\\n/g, '\n');
+
+        // Update preview only if current file tab is active
+        const active = document.querySelector(".tab.active")?.dataset.file;
+        if (active === currentFile) updatePreview();
       };
 
       eventSource.onerror = (err) => {
         console.error("EventSource failed:", err);
+        status.textContent = "Stream error.";
         eventSource.close();
       };
     }
+
+    function downloadZip() {
+      if (Object.keys(pages).length === 0) {
+        alert("No files to download yet.");
+        return;
+      }
+
+      const zip = new JSZip();
+      for (const [filename, content] of Object.entries(pages)) {
+        zip.file(filename, content);
+      }
+
+      zip.generateAsync({ type: "blob" }).then(blob => {
+        const a = document.createElement("a");
+        a.href = URL.createObjectURL(blob);
+        a.download = "generated-ui.zip";
+        a.click();
+        URL.revokeObjectURL(a.href);
+      });
+    }
+
+    document.getElementById("prompt").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") startStream();
+    });
   </script>
 </body>
+
 </html>

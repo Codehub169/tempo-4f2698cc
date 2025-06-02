@@ -17,6 +17,7 @@ app.use(express.static(path.join(__dirname, "public")));
 
 app.get("/generate", async (req, res) => {
    let prompt = req.query.prompt;
+   let model = req.query.model
    if (!prompt) return res.status(400).send("Missing prompt");
 
    res.setHeader("Content-Type", "text/event-stream");
@@ -26,10 +27,41 @@ app.get("/generate", async (req, res) => {
 
    try {
       const response = await ai.models.generateContentStream({
-         model: "gemini-2.5-pro-preview-05-06",
-         contents: prompt,
+         model: model,
+         contents: `
+         Respond with code only. If the design requires multiple files, wrap each one like this:
+
+         [FILE: index.html]
+         <html>...</html>
+
+         [FILE: style.css]
+         body { ... }
+
+         NEVER explain anything. Just output clean, modern, production-quality HTML, CSS, and JS.
+
+         User request:
+         ${prompt}
+         `,
          config: {
-            systemInstruction: "You are codeing assistant that helps to build an amazing prototype that is just a design and doesn't function at all, You need to use a single HTML page to show your design, you cannot talk or say any preamble or intro you just need to give the code which will showcase your design, make sure it is production level and will awe the coders at google itself",
+            systemInstruction: `
+         You are a coding assistant that helps to build an amazing prototype that is purely for design, not functionality. 
+         You must respond ONLY with code — no explanations, no preambles.
+
+         Use HTML, CSS, and JavaScript only. Ensure your output is clean, modern, and production-quality — it should awe top-tier developers.
+
+         Ensure CSS, JS is always inside HTLM files only, do not create extra files
+
+         If the design requires multiple pages (e.g., for navigation), output each file in the following format:
+
+         [FILE: filename.html]
+         <entire contents of that file>
+
+         Repeat for all files (e.g., index.html, about.html, etc). Do not include explanations or anything outside this format.
+
+         The main file should be named index.html. Include all necessary files this way so the frontend can preview index.html and allow ZIP download of all files.
+
+         You are not allowed to talk or introduce the output — just stream the raw code.
+            `
          },
       });
 
